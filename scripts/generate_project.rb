@@ -52,6 +52,7 @@ supporting_group.new_file("Info.plist")
 [
   "AppIntents.framework",
   "AVFoundation.framework",
+  "Photos.framework",
   "PhotosUI.framework",
   "Speech.framework",
   "SwiftData.framework",

@@ -12,6 +12,7 @@ struct QuickCaptureView: View {
     @State private var showsCamera = false
     @State private var showsNoteEditor = false
     @State private var showsScreenshotHelp = false
+    @AppStorage("importLatestScreenshotRequested") private var importLatestScreenshotRequested = false
     @State private var isSaving = false
     @State private var message: String?
 
@@ -139,6 +140,9 @@ struct QuickCaptureView: View {
             .sheet(isPresented: $showsScreenshotHelp) {
                 ScreenshotShortcutHelpView()
             }
+            .task {
+                await importLatestScreenshotIfRequested()
+            }
         }
     }
 
@@ -204,6 +208,22 @@ struct QuickCaptureView: View {
         let total = Int(interval)
         return String(format: "%d:%02d", total / 60, total % 60)
     }
+
+    @MainActor
+    private func importLatestScreenshotIfRequested() async {
+        guard importLatestScreenshotRequested else { return }
+        importLatestScreenshotRequested = false
+        isSaving = true
+        message = "Importing the latest screenshot locally…"
+
+        do {
+            let imageData = try await LatestScreenshotImporter.loadLatestScreenshot()
+            await saveImage(imageData)
+        } catch {
+            message = error.localizedDescription
+            isSaving = false
+        }
+    }
 }
 
 private struct QuickNoteView: View {
@@ -268,13 +288,14 @@ private struct ScreenshotShortcutHelpView: View {
         NavigationStack {
             List {
                 Section("Make it work like an Essential Key") {
-                    Text("Create a Shortcut with these two actions:")
+                    Text("Create a Shortcut with these three actions. There are no variables to add:")
                     Label("Take Screenshot", systemImage: "viewfinder")
-                    Label("Save Screenshot to Memory Space", systemImage: "tray.and.arrow.down.fill")
+                    Label("Save to Photo Album", systemImage: "photo.on.rectangle")
+                    Label("Finish Screenshot Capture", systemImage: "tray.and.arrow.down.fill")
                 }
 
                 Section("Then assign it") {
-                    Text("In Settings, choose Action Button → Shortcut and select the shortcut you created. Each press captures the current screen, saves it locally, extracts text, then opens this screen so you can add a note or voice recording.")
+                    Text("In Settings, choose Action Button → Shortcut and select the shortcut you created. Each press captures the current screen, saves it to Photos, imports it into Memory Space, extracts text, then opens this screen so you can add a note or voice recording. On first use, choose Full Access when Memory Space asks to read Photos.")
                 }
             }
             .navigationTitle("Screenshot Capture")

@@ -29,34 +29,13 @@ struct MemorySpaceShortcuts: AppShortcutsProvider {
     }
 }
 
-struct SaveScreenshotToMemorySpaceIntent: AppIntent {
-    static var title: LocalizedStringResource = "Save Screenshot to Memory Space"
-    static var description = IntentDescription("Save a screenshot locally, extract its text, and open Quick Capture.")
+struct FinishScreenshotCaptureIntent: AppIntent {
+    static var title: LocalizedStringResource = "Finish Screenshot Capture"
+    static var description = IntentDescription("Import the screenshot that was just saved to Photos, then open Memory Space for a note or voice recording.")
     static var openAppWhenRun = true
 
-    @Parameter(title: "Screenshot") var screenshot: IntentFile
-
     func perform() async throws -> some IntentResult {
-        let fileName = try LocalFileStore.save(data: screenshot.data, fileExtension: "png")
-        let item = CaptureItem(
-            kind: .image,
-            title: "Screenshot",
-            assetFileName: fileName,
-            isProcessing: true
-        )
-
-        let container = try MemorySpaceStore.makeContainer()
-        let context = ModelContext(container)
-        context.insert(item)
-        try context.save()
-
-        let extractedText = await TextExtractor.extractText(from: screenshot.data)
-        item.bodyText = extractedText
-        item.title = CaptureItem.suggestedTitle(from: extractedText, fallback: "Screenshot")
-        item.tagsText = CaptureItem.suggestedTags(from: extractedText).joined(separator: ", ")
-        item.isProcessing = false
-        try context.save()
-
+        UserDefaults.standard.set(true, forKey: "importLatestScreenshotRequested")
         UserDefaults.standard.set(true, forKey: "quickCaptureRequested")
         return .result()
     }

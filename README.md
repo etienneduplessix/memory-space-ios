@@ -6,7 +6,7 @@ It currently supports local voice recordings, photo capture/import, on-device OC
 
 ## Screenshot shortcut
 
-To make the Action Button capture the current screen, create a shortcut containing **Take Screenshot** followed by **Save Screenshot to Memory Space**, then assign that shortcut in **Settings → Action Button → Shortcut**. The app saves the screenshot locally, extracts its text, and opens Quick Capture for an additional note or voice recording.
+To make the Action Button capture the current screen, create a shortcut containing **Take Screenshot**, **Save to Photo Album**, and **Finish Screenshot Capture**, then assign that shortcut in **Settings → Action Button → Shortcut**. No variables are needed. The app imports the newest screenshot locally, extracts its text, and opens Quick Capture for an additional note or voice recording. On first use, grant Memory Space **Full Access** to Photos so it can read the screenshot that you explicitly saved.
 
 ## Open and run
 

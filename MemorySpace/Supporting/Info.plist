@@ -26,6 +26,8 @@
     <string>Your camera is used to capture items for your local Memory Space.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Your microphone is used to record local voice notes.</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Memory Space reads the latest screenshot that you explicitly save with your Action Button shortcut, so it can keep the capture locally with your note and voice recording.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>Speech recognition creates on-device transcripts for your voice notes.</string>
     <key>UIApplicationSceneManifest</key>
