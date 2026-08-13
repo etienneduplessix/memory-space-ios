@@ -5,9 +5,7 @@ import SwiftUI
 struct MemorySpaceApp: App {
     private let modelContainer: ModelContainer = {
         do {
-            let schema = Schema([CaptureItem.self])
-            let configuration = ModelConfiguration("MemorySpace", schema: schema)
-            return try ModelContainer(for: schema, configurations: [configuration])
+            return try MemorySpaceStore.makeContainer()
         } catch {
             fatalError("Unable to open the local Memory Space library: \(error)")
         }
