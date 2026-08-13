@@ -161,17 +161,23 @@ struct QuickCaptureView: View {
         modelContext.insert(item)
         try? modelContext.save()
 
-        let transcript = await SpeechTranscriber.transcribeLocally(url: recording.url) ?? ""
-        item.bodyText = transcript
-        item.title = CaptureItem.suggestedTitle(from: transcript, fallback: "Voice note")
-        item.tagsText = CaptureItem.suggestedTags(from: transcript).joined(separator: ", ")
+        let transcription = await LocalSpeechTranscriber.transcribeLocally(url: recording.url)
+        switch transcription {
+        case .success(let transcript):
+            item.bodyText = transcript
+            item.transcriptionNotice = nil
+            item.title = CaptureItem.suggestedTitle(from: transcript, fallback: "Voice note")
+            item.tagsText = CaptureItem.suggestedTags(from: transcript).joined(separator: ", ")
+            message = "Voice note and local transcript saved."
+        case .unavailable(let explanation):
+            item.bodyText = ""
+            item.transcriptionNotice = explanation
+            message = "Voice note saved. \(explanation)"
+        }
         item.isProcessing = false
         try? modelContext.save()
 
         isSaving = false
-        message = transcript.isEmpty
-            ? "Saved locally. A local transcript is not available for the current language."
-            : "Voice note saved locally."
     }
 
     @MainActor

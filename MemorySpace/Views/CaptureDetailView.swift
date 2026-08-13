@@ -46,8 +46,13 @@ struct CaptureDetailView: View {
                         Text("Processing locally…")
                     }
                 }
-                TextEditor(text: $item.bodyText)
-                    .frame(minHeight: 180)
+                if let transcriptionNotice = item.transcriptionNotice, !transcriptionNotice.isEmpty {
+                    Label(transcriptionNotice, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                } else {
+                    TextEditor(text: $item.bodyText)
+                        .frame(minHeight: 180)
+                }
             }
 
             Section("Tags") {

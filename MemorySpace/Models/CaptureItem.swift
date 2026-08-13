@@ -37,6 +37,7 @@ final class CaptureItem {
     var assetFileName: String?
     var durationSeconds: Double
     var isProcessing: Bool
+    var transcriptionNotice: String?
 
     init(
         kind: CaptureKind,
@@ -46,7 +47,8 @@ final class CaptureItem {
         collectionName: String = "Inbox",
         assetFileName: String? = nil,
         durationSeconds: Double = 0,
-        isProcessing: Bool = false
+        isProcessing: Bool = false,
+        transcriptionNotice: String? = nil
     ) {
         self.id = UUID()
         self.createdAt = .now
@@ -58,6 +60,7 @@ final class CaptureItem {
         self.assetFileName = assetFileName
         self.durationSeconds = durationSeconds
         self.isProcessing = isProcessing
+        self.transcriptionNotice = transcriptionNotice
     }
 
     var kind: CaptureKind {
@@ -73,6 +76,7 @@ final class CaptureItem {
 
     var previewText: String {
         if isProcessing { return "Processing locally…" }
+        if let transcriptionNotice, !transcriptionNotice.isEmpty { return transcriptionNotice }
         if bodyText.isEmpty { return "No extracted text" }
         return bodyText.replacingOccurrences(of: "\n", with: " ")
     }
