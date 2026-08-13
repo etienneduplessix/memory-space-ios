@@ -25,13 +25,13 @@ enum LatestScreenshotImporter {
             throw ImportError.permissionDenied
         }
 
+        // Shortcuts' "Save to Photo Album" action stores a screenshot as a regular
+        // image in Recents, not always with Photos' screenshot media subtype.
+        // The shortcut runs this importer immediately after saving, so the newest
+        // image is the one it just captured.
         let options = PHFetchOptions()
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         options.fetchLimit = 1
-        options.predicate = NSPredicate(
-            format: "(mediaSubtype & %d) != 0",
-            PHAssetMediaSubtype.photoScreenshot.rawValue
-        )
 
         let results = PHAsset.fetchAssets(with: .image, options: options)
         guard let asset = results.firstObject else {
