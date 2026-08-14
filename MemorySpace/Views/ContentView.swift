@@ -1,5 +1,6 @@
 import SwiftData
 import SwiftUI
+import UIKit
 
 struct ContentView: View {
     @State private var showsQuickCapture = false
@@ -7,9 +8,14 @@ struct ContentView: View {
 
     var body: some View {
         TabView {
+            TimelineView(showsQuickCapture: $showsQuickCapture)
+                .tabItem {
+                    Label("Timeline", systemImage: "rectangle.3.group.fill")
+                }
+
             InboxView(showsQuickCapture: $showsQuickCapture)
                 .tabItem {
-                    Label("Inbox", systemImage: "tray.full.fill")
+                    Label("Library", systemImage: "tray.full.fill")
                 }
 
             CollectionsView()
@@ -38,6 +44,189 @@ struct ContentView: View {
         guard quickCaptureRequested else { return }
         quickCaptureRequested = false
         showsQuickCapture = true
+    }
+}
+
+private struct TimelineView: View {
+    @Binding var showsQuickCapture: Bool
+    @Query(sort: \CaptureItem.createdAt, order: .reverse) private var allItems: [CaptureItem]
+
+    private var rootItems: [CaptureItem] {
+        allItems.filter { $0.parentCaptureID == nil }
+    }
+
+    private var dayGroups: [TimelineDay] {
+        let calendar = Calendar.current
+        let groupedItems = Dictionary(grouping: rootItems) { item in
+            calendar.startOfDay(for: item.createdAt)
+        }
+
+        return groupedItems
+            .map { TimelineDay(date: $0.key, items: $0.value.sorted { $0.createdAt > $1.createdAt }) }
+            .sorted { $0.date > $1.date }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if dayGroups.isEmpty {
+                    ContentUnavailableView {
+                        Label("Your timeline is empty", systemImage: "rectangle.3.group")
+                    } description: {
+                        Text("Use Quick Capture to save a screenshot, then add a note or voice recording. It will appear here as one block.")
+                    } actions: {
+                        Button("Quick Capture") {
+                            showsQuickCapture = true
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 22) {
+                            Text("New captures appear here automatically. Screenshots keep their notes and voice transcripts together.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 20)
+
+                            ForEach(dayGroups) { day in
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text(day.title)
+                                        .font(.title3.bold())
+                                        .padding(.horizontal, 20)
+
+                                    ForEach(day.items, id: \.id) { item in
+                                        NavigationLink {
+                                            CaptureDetailView(item: item)
+                                        } label: {
+                                            TimelineCaptureBlock(
+                                                item: item,
+                                                linkedItems: allItems.filter { $0.parentCaptureID == item.id }
+                                            )
+                                        }
+                                        .buttonStyle(.plain)
+                                        .padding(.horizontal, 16)
+                                    }
+                                }
+                            }
+                        }
+                        .padding(.vertical, 16)
+                    }
+                }
+            }
+            .navigationTitle("Timeline")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showsQuickCapture = true
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.title3)
+                    }
+                    .accessibilityLabel("Quick Capture")
+                }
+            }
+        }
+    }
+}
+
+private struct TimelineDay: Identifiable {
+    let date: Date
+    let items: [CaptureItem]
+
+    var id: Date { date }
+
+    var title: String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) { return "Today" }
+        if calendar.isDateInYesterday(date) { return "Yesterday" }
+        return date.formatted(date: .complete, time: .omitted)
+    }
+}
+
+private struct TimelineCaptureBlock: View {
+    let item: CaptureItem
+    let linkedItems: [CaptureItem]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Label(item.kind == .image ? "Screenshot or image" : item.kind.title, systemImage: item.kind.symbol)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(accentColor)
+                Spacer()
+                Text(item.createdAt, format: .dateTime.hour().minute())
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if item.kind == .image, let image = localImage {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 164)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+
+            Text(item.title)
+                .font(.headline)
+                .lineLimit(2)
+
+            if item.kind != .image, !item.previewText.isEmpty {
+                Text(item.previewText)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+            }
+
+            if linkedItems.isEmpty, item.kind == .image {
+                Label("No linked note yet — add one from Quick Capture.", systemImage: "plus.bubble")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else if !linkedItems.isEmpty {
+                Divider()
+
+                Text("Linked to this capture")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                ForEach(linkedItems, id: \.id) { linkedItem in
+                    HStack(alignment: .top, spacing: 9) {
+                        Image(systemName: linkedItem.kind.symbol)
+                            .foregroundStyle(linkedItem.kind == .voice ? .indigo : .mint)
+                            .frame(width: 18)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(linkedItem.title)
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(1)
+                            Text(linkedItem.previewText)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(15)
+        .background(.background, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(.quaternary, lineWidth: 1)
+        }
+    }
+
+    private var accentColor: Color {
+        switch item.kind {
+        case .voice: .indigo
+        case .image: .orange
+        case .text: .mint
+        }
+    }
+
+    private var localImage: UIImage? {
+        guard let fileName = item.assetFileName, let url = LocalFileStore.url(for: fileName) else { return nil }
+        return UIImage(contentsOfFile: url.path)
     }
 }
 
