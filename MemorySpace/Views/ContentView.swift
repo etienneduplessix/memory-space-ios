@@ -97,9 +97,18 @@ private struct TimelineView: View {
 
                             ForEach(dayGroups) { day in
                                 VStack(alignment: .leading, spacing: 10) {
-                                    Text(day.title)
-                                        .font(.title3.bold())
-                                        .padding(.horizontal, 20)
+                                    HStack {
+                                        Text(day.title)
+                                            .font(.title3.bold())
+                                        Spacer()
+                                        if isSelecting {
+                                            Button(isDayFullySelected(day) ? "Deselect day" : "Select day") {
+                                                toggleDaySelection(day)
+                                            }
+                                            .font(.caption.weight(.semibold))
+                                        }
+                                    }
+                                    .padding(.horizontal, 20)
 
                                     ForEach(day.items, id: \.id) { item in
                                         if isSelecting {
@@ -148,13 +157,23 @@ private struct TimelineView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showsQuickCapture = true
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.title3)
+                    if isSelecting {
+                        Button(areAllRootItemsSelected ? "Clear" : "All") {
+                            if areAllRootItemsSelected {
+                                selectedIDs.removeAll()
+                            } else {
+                                selectedIDs = Set(rootItems.map(\.id))
+                            }
+                        }
+                    } else {
+                        Button {
+                            showsQuickCapture = true
+                        } label: {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.title3)
+                        }
+                        .accessibilityLabel("Quick Capture")
                     }
-                    .accessibilityLabel("Quick Capture")
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -175,6 +194,23 @@ private struct TimelineView: View {
             selectedIDs.remove(item.id)
         } else {
             selectedIDs.insert(item.id)
+        }
+    }
+
+    private var areAllRootItemsSelected: Bool {
+        !rootItems.isEmpty && Set(rootItems.map(\.id)).isSubset(of: selectedIDs)
+    }
+
+    private func isDayFullySelected(_ day: TimelineDay) -> Bool {
+        Set(day.items.map(\.id)).isSubset(of: selectedIDs)
+    }
+
+    private func toggleDaySelection(_ day: TimelineDay) {
+        let dayIDs = Set(day.items.map(\.id))
+        if dayIDs.isSubset(of: selectedIDs) {
+            selectedIDs.subtract(dayIDs)
+        } else {
+            selectedIDs.formUnion(dayIDs)
         }
     }
 }
@@ -698,13 +734,23 @@ private struct InboxView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showsQuickCapture = true
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.title3)
+                    if isSelecting {
+                        Button(areAllFilteredItemsSelected ? "Clear" : "All") {
+                            if areAllFilteredItemsSelected {
+                                selectedIDs.removeAll()
+                            } else {
+                                selectedIDs = Set(filteredItems.map(\.id))
+                            }
+                        }
+                    } else {
+                        Button {
+                            showsQuickCapture = true
+                        } label: {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.title3)
+                        }
+                        .accessibilityLabel("Quick Capture")
                     }
-                    .accessibilityLabel("Quick Capture")
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -722,6 +768,10 @@ private struct InboxView: View {
 
     private var archivedItems: [CaptureItem] {
         items.filter { $0.parentCaptureID == nil && $0.isArchived }
+    }
+
+    private var areAllFilteredItemsSelected: Bool {
+        !filteredItems.isEmpty && Set(filteredItems.map(\.id)).isSubset(of: selectedIDs)
     }
 
     private func toggleSelection(for item: CaptureItem) {
@@ -864,6 +914,17 @@ private struct CollectionItemsView: View {
                     if !isSelecting { selectedIDs.removeAll() }
                 }
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                if isSelecting {
+                    Button(areAllItemsSelected ? "Clear" : "All") {
+                        if areAllItemsSelected {
+                            selectedIDs.removeAll()
+                        } else {
+                            selectedIDs = Set(items.map(\.id))
+                        }
+                    }
+                }
+            }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if isSelecting {
@@ -883,6 +944,10 @@ private struct CollectionItemsView: View {
         } else {
             selectedIDs.insert(item.id)
         }
+    }
+
+    private var areAllItemsSelected: Bool {
+        !items.isEmpty && Set(items.map(\.id)).isSubset(of: selectedIDs)
     }
 }
 
@@ -931,6 +996,17 @@ private struct ArchivedItemsView: View {
                     }
                 }
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                if isSelecting {
+                    Button(areAllItemsSelected ? "Clear" : "All") {
+                        if areAllItemsSelected {
+                            selectedIDs.removeAll()
+                        } else {
+                            selectedIDs = Set(items.map(\.id))
+                        }
+                    }
+                }
+            }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if isSelecting {
@@ -950,6 +1026,10 @@ private struct ArchivedItemsView: View {
         } else {
             selectedIDs.insert(item.id)
         }
+    }
+
+    private var areAllItemsSelected: Bool {
+        !items.isEmpty && Set(items.map(\.id)).isSubset(of: selectedIDs)
     }
 }
 
