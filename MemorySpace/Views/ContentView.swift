@@ -752,28 +752,68 @@ private struct MacSyncView: View {
     @AppStorage("macSyncEndpoint") private var endpoint = ""
     @AppStorage("macSyncPairingToken") private var pairingToken = ""
     @AppStorage("macSyncLastSuccess") private var lastSuccess = 0.0
+    @StateObject private var nearbySync = NearbyMacSyncService()
     @State private var isSyncing = false
     @State private var message: String?
 
     var body: some View {
         Form {
             Section {
+                SecureField("Pairing token from your Mac", text: $pairingToken)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            } header: {
+                Text("Pair your Mac once")
+            } footer: {
+                Text("Start Memory Space Nearby Bridge on your Mac and enter its pairing token here. After that, nearby syncing needs only one tap.")
+            }
+
+            Section {
+                if nearbySync.nearbyMacs.isEmpty {
+                    Text(nearbySync.statusMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Button("Find nearby Macs") {
+                        nearbySync.startBrowsing()
+                    }
+                } else {
+                    ForEach(nearbySync.nearbyMacs) { mac in
+                        Button {
+                            Task { await syncNearby(to: mac) }
+                        } label: {
+                            HStack {
+                                Label(mac.name, systemImage: "laptopcomputer")
+                                Spacer()
+                                if isSyncing {
+                                    ProgressView()
+                                } else {
+                                    Text("Sync")
+                                        .foregroundStyle(.indigo)
+                                }
+                            }
+                        }
+                        .disabled(isSyncing || pairingToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
+            } header: {
+                Text("Sync to a nearby Mac")
+            } footer: {
+                Text("No router or internet is needed. Keep Wi‑Fi and Bluetooth turned on, and keep both devices nearby while syncing.")
+            }
+
+            Section {
                 TextField("http://192.168.1.20:8787", text: $endpoint)
                     .textInputAutocapitalization(.never)
                     .keyboardType(.URL)
                     .autocorrectionDisabled()
-                SecureField("Pairing token from your Mac", text: $pairingToken)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-
                 Button("Test connection") {
                     Task { await testConnection() }
                 }
                 .disabled(isSyncing || endpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             } header: {
-                Text("Connect your Mac")
+                Text("Wi‑Fi fallback")
             } footer: {
-                Text("Start Memory Space Bridge on your Mac. It prints this address and a pairing token. Both devices must use the same trusted Wi‑Fi network.")
+                Text("Use this only if nearby discovery is unavailable. Start Memory Space Bridge on your Mac; it prints the address and uses the same pairing token.")
             }
 
             Section("Manual sync") {
@@ -804,7 +844,7 @@ private struct MacSyncView: View {
             }
 
             Section("Privacy") {
-                Text("The Mac bridge is local-only. This first version uses a pairing token over your trusted home Wi‑Fi; do not use it on public networks.")
+                Text("Nearby sync uses a pairing token and works without internet or a Wi‑Fi router. The IP-address fallback is only for trusted private Wi‑Fi because it does not use TLS yet.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -818,6 +858,12 @@ private struct MacSyncView: View {
         }
         .navigationTitle("Sync to Mac")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            nearbySync.startBrowsing()
+        }
+        .onDisappear {
+            nearbySync.stopBrowsing()
+        }
     }
 
     @MainActor
@@ -840,6 +886,20 @@ private struct MacSyncView: View {
             let result = try await MacSyncService.sync(captures: captures, endpointText: endpoint, pairingToken: pairingToken)
             lastSuccess = result.updatedAt.timeIntervalSince1970
             message = "Synced \(result.receivedCaptures) captures to your Mac."
+        } catch {
+            message = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func syncNearby(to mac: NearbyMac) async {
+        isSyncing = true
+        defer { isSyncing = false }
+        do {
+            let data = try MacSyncService.nearbySyncData(captures: captures, pairingToken: pairingToken)
+            try await nearbySync.sync(data: data, to: mac)
+            lastSuccess = Date.now.timeIntervalSince1970
+            message = "Synced \(captures.count) captures directly to \(mac.name)."
         } catch {
             message = error.localizedDescription
         }

@@ -1,6 +1,6 @@
-# Memory Space Bridge
+# Memory Space Bridge (Wi-Fi fallback)
 
-This is the Mac-side companion for the Memory Space iPhone app. It keeps a local mirror of your synced captures and exposes read-only MCP tools to an agent on the same Mac.
+This is the same-Wi-Fi fallback companion for the Memory Space iPhone app. For direct nearby syncing without a Wi-Fi network or internet, use [../memory-space-nearby-bridge/README.md](../memory-space-nearby-bridge/README.md).
 
 ## Start the local bridge
 

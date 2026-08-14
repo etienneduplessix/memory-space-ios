@@ -12,8 +12,10 @@ To make the Action Button capture the current screen, create a shortcut containi
 
 Open `MemorySpace.xcodeproj` in Xcode, select your iPhone, select your Personal Team under **Signing & Capabilities**, then press Run.
 
-## Optional local Mac sync and MCP
+## Optional local nearby Mac sync and MCP
 
-The iPhone app can manually sync a local mirror to your Mac over trusted home Wi-Fi. Start the companion bridge in [memory-space-bridge/README.md](memory-space-bridge/README.md), then on the iPhone open **Memory Space → Privacy → Sync to Mac**. Enter the Mac address and pairing token printed by the bridge, test the connection, then tap **Sync to Mac now**.
+The preferred companion is [memory-space-nearby-bridge/README.md](memory-space-nearby-bridge/README.md). It transfers a local mirror directly to a nearby Mac with Wi-Fi and Bluetooth radios, but without joining a Wi-Fi network or using the internet. On the iPhone, open **Memory Space → Privacy → Sync to Mac**, enter the pairing token once, then select the nearby Mac and tap **Sync**.
+
+[memory-space-bridge/README.md](memory-space-bridge/README.md) remains available as a same-Wi-Fi fallback using an IP address.
 
 The bridge exposes read-only MCP tools to a local agent on the same Mac. The app has no cloud service, analytics SDK, or remote backend.

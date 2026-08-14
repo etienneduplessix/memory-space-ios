@@ -4,3 +4,4 @@ build/
 xcuserdata/
 *.xcuserstate
 memory-space-bridge/node_modules/
+memory-space-nearby-bridge/.build/

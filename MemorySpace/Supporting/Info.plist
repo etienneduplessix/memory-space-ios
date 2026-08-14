@@ -28,6 +28,10 @@
     <string>Your microphone is used to record local voice notes.</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>Memory Space uses your local network only when you choose to sync captures to your paired Mac.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_memoryspace._tcp</string>
+    </array>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>Memory Space reads the latest screenshot that you explicitly save with your Action Button shortcut, so it can keep the capture locally with your note and voice recording.</string>
     <key>NSSpeechRecognitionUsageDescription</key>

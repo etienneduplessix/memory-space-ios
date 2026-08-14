@@ -1,4 +1,6 @@
+import Combine
 import Foundation
+import Network
 import SwiftData
 import UIKit
 
@@ -46,12 +48,7 @@ enum MacSyncService {
         let token = pairingToken.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !token.isEmpty else { throw MacSyncError.missingPairingToken }
 
-        let payload = MacSyncPayload(
-            deviceName: UIDevice.current.name,
-            sentAt: .now,
-            captures: captures.map(MacSyncCapture.init),
-            customBlocksData: UserDefaults.standard.data(forKey: "customSmartBlocksData")?.base64EncodedString()
-        )
+        let payload = makePayload(captures: captures)
 
         var request = URLRequest(url: endpoint.appendingPathComponent("v1/sync"))
         request.httpMethod = "POST"
@@ -91,6 +88,32 @@ enum MacSyncService {
         }
     }
 
+    @MainActor
+    static func nearbySyncData(captures: [CaptureItem], pairingToken: String) throws -> Data {
+        let token = pairingToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else { throw MacSyncError.missingPairingToken }
+
+        let payloadData = try encodedData(for: makePayload(captures: captures))
+        let envelope = NearbyMacSyncEnvelope(pairingToken: token, payloadBase64: payloadData.base64EncodedString())
+        return try JSONEncoder().encode(envelope)
+    }
+
+    @MainActor
+    private static func makePayload(captures: [CaptureItem]) -> MacSyncPayload {
+        MacSyncPayload(
+            deviceName: UIDevice.current.name,
+            sentAt: .now,
+            captures: captures.map(MacSyncCapture.init),
+            customBlocksData: UserDefaults.standard.data(forKey: "customSmartBlocksData")?.base64EncodedString()
+        )
+    }
+
+    private static func encodedData(for payload: MacSyncPayload) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return try encoder.encode(payload)
+    }
+
     private static func syncEndpoint(from endpointText: String) throws -> URL {
         let trimmed = endpointText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: trimmed),
@@ -108,6 +131,11 @@ private struct MacSyncPayload: Encodable {
     let sentAt: Date
     let captures: [MacSyncCapture]
     let customBlocksData: String?
+}
+
+private struct NearbyMacSyncEnvelope: Encodable {
+    let pairingToken: String
+    let payloadBase64: String
 }
 
 private struct MacSyncCapture: Encodable {
@@ -162,4 +190,113 @@ private struct MacSyncCapture: Encodable {
 
 private struct MacSyncBridgeError: Decodable {
     let error: String
+}
+
+struct NearbyMac: Identifiable {
+    let id: String
+    let name: String
+    fileprivate let endpoint: NWEndpoint
+}
+
+final class NearbyMacSyncService: ObservableObject {
+    @Published private(set) var nearbyMacs: [NearbyMac] = []
+    @Published private(set) var statusMessage = "Looking for nearby Macs…"
+
+    private let queue = DispatchQueue(label: "com.etienneduplessix.memoryspace.nearby-sync")
+    private var browser: NWBrowser?
+    private var activeConnection: NWConnection?
+
+    func startBrowsing() {
+        stopBrowsing()
+
+        let parameters = NWParameters.tcp
+        parameters.includePeerToPeer = true
+        let browser = NWBrowser(for: .bonjour(type: "_memoryspace._tcp", domain: nil), using: parameters)
+        browser.browseResultsChangedHandler = { [weak self] results, _ in
+            let macs = results.compactMap { result -> NearbyMac? in
+                guard case let .service(name, _, _, _) = result.endpoint else { return nil }
+                return NearbyMac(id: result.endpoint.debugDescription, name: name, endpoint: result.endpoint)
+            }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+
+            DispatchQueue.main.async {
+                self?.nearbyMacs = macs
+                self?.statusMessage = macs.isEmpty ? "No nearby Mac bridge found yet." : "Select a nearby Mac to sync."
+            }
+        }
+        browser.stateUpdateHandler = { [weak self] state in
+            guard case let .failed(error) = state else { return }
+            DispatchQueue.main.async {
+                self?.statusMessage = "Nearby discovery failed: \(error.localizedDescription)"
+            }
+        }
+
+        self.browser = browser
+        browser.start(queue: queue)
+    }
+
+    func stopBrowsing() {
+        browser?.cancel()
+        browser = nil
+        nearbyMacs = []
+    }
+
+    func sync(data: Data, to mac: NearbyMac) async throws {
+        let framedData: Data = {
+            var frameLength = UInt64(data.count).bigEndian
+            var frame = Data(bytes: &frameLength, count: MemoryLayout<UInt64>.size)
+            frame.append(data)
+            return frame
+        }()
+
+        let parameters = NWParameters.tcp
+        parameters.includePeerToPeer = true
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let connection = NWConnection(to: mac.endpoint, using: parameters)
+            self.activeConnection = connection
+            var completed = false
+
+            func finish(_ result: Result<Void, Error>) {
+                guard !completed else { return }
+                completed = true
+                connection.cancel()
+                self.activeConnection = nil
+                continuation.resume(with: result)
+            }
+
+            connection.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    connection.send(content: framedData, completion: .contentProcessed { error in
+                        if let error {
+                            finish(.failure(error))
+                            return
+                        }
+
+                        connection.receive(minimumIncompleteLength: 1, maximumLength: 1_024) { responseData, _, _, responseError in
+                            if let responseError {
+                                finish(.failure(responseError))
+                                return
+                            }
+
+                            let response = responseData.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+                            if response.hasPrefix("OK") {
+                                finish(.success(()))
+                            } else {
+                                finish(.failure(MacSyncError.bridgeRejected(response.isEmpty ? "Nearby Mac rejected the sync." : response)))
+                            }
+                        }
+                    })
+                case let .failed(error):
+                    finish(.failure(error))
+                case .cancelled:
+                    finish(.failure(MacSyncError.bridgeRejected("Nearby Mac connection was cancelled.")))
+                default:
+                    break
+                }
+            }
+            connection.start(queue: self.queue)
+        }
+    }
 }
