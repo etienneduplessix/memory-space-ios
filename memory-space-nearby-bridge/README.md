@@ -11,7 +11,7 @@ cd /Users/etienneduplessix/Developement/perso/memory-space-ios/memory-space-near
 swift run MemorySpaceNearbyBridge
 ```
 
-Keep this Terminal window open. It prints a pairing token.
+Keep this Terminal window open. It prints a pairing token. The token is used to encrypt and authenticate every nearby transfer.
 
 On the iPhone, open **Memory Space → Privacy → Sync to Mac**, enter the token once, select the discovered Mac, and tap **Sync**.
 

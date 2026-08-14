@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Network
 
@@ -7,6 +8,12 @@ private let maximumPayloadBytes = 40 * 1024 * 1024
 private struct BridgeConfiguration: Codable {
     let pairingToken: String
     let createdAt: String
+}
+
+private struct NearbyMacSyncEnvelope: Decodable {
+    let nonceBase64: String
+    let ciphertextBase64: String
+    let tagBase64: String
 }
 
 private final class NearbyBridgeReceiver: @unchecked Sendable {
@@ -99,15 +106,18 @@ private final class NearbyBridgeReceiver: @unchecked Sendable {
     }
 
     private func persist(_ envelopeData: Data) throws -> Int {
-        let envelopeObject = try JSONSerialization.jsonObject(with: envelopeData)
-        guard let envelope = envelopeObject as? [String: Any],
-              let pairingToken = envelope["pairingToken"] as? String,
-              pairingToken == configuration.pairingToken else {
-            throw NSError(domain: "MemorySpaceNearbyBridge", code: 401, userInfo: [NSLocalizedDescriptionKey: "The pairing token is not valid."])
+        let envelope = try JSONDecoder().decode(NearbyMacSyncEnvelope.self, from: envelopeData)
+        guard let nonce = Data(base64Encoded: envelope.nonceBase64),
+              let ciphertext = Data(base64Encoded: envelope.ciphertextBase64),
+              let tag = Data(base64Encoded: envelope.tagBase64) else {
+            throw NSError(domain: "MemorySpaceNearbyBridge", code: 400, userInfo: [NSLocalizedDescriptionKey: "The nearby sync payload is not valid."])
         }
-        guard let encodedPayload = envelope["payloadBase64"] as? String,
-              let payloadData = Data(base64Encoded: encodedPayload),
-              let payload = try JSONSerialization.jsonObject(with: payloadData) as? [String: Any],
+
+        let key = SymmetricKey(data: Data(SHA256.hash(data: Data(configuration.pairingToken.utf8))))
+        let sealedBox = try AES.GCM.SealedBox(nonce: AES.GCM.Nonce(data: nonce), ciphertext: ciphertext, tag: tag)
+        let payloadData = try AES.GCM.open(sealedBox, using: key)
+
+        guard let payload = try JSONSerialization.jsonObject(with: payloadData) as? [String: Any],
               let rawCaptures = payload["captures"] as? [[String: Any]] else {
             throw NSError(domain: "MemorySpaceNearbyBridge", code: 400, userInfo: [NSLocalizedDescriptionKey: "The nearby sync payload is not valid."])
         }

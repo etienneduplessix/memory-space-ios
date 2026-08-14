@@ -1,4 +1,5 @@
 import Combine
+import CryptoKit
 import Foundation
 import Network
 import SwiftData
@@ -94,7 +95,13 @@ enum MacSyncService {
         guard !token.isEmpty else { throw MacSyncError.missingPairingToken }
 
         let payloadData = try encodedData(for: makePayload(captures: captures))
-        let envelope = NearbyMacSyncEnvelope(pairingToken: token, payloadBase64: payloadData.base64EncodedString())
+        let key = SymmetricKey(data: Data(SHA256.hash(data: Data(token.utf8))) )
+        let sealedBox = try AES.GCM.seal(payloadData, using: key)
+        let envelope = NearbyMacSyncEnvelope(
+            nonceBase64: sealedBox.nonce.withUnsafeBytes { Data($0).base64EncodedString() },
+            ciphertextBase64: sealedBox.ciphertext.base64EncodedString(),
+            tagBase64: sealedBox.tag.base64EncodedString()
+        )
         return try JSONEncoder().encode(envelope)
     }
 
@@ -134,8 +141,9 @@ private struct MacSyncPayload: Encodable {
 }
 
 private struct NearbyMacSyncEnvelope: Encodable {
-    let pairingToken: String
-    let payloadBase64: String
+    let nonceBase64: String
+    let ciphertextBase64: String
+    let tagBase64: String
 }
 
 private struct MacSyncCapture: Encodable {
