@@ -13,6 +13,11 @@ struct ContentView: View {
                     Label("Timeline", systemImage: "rectangle.3.group.fill")
                 }
 
+            SmartSortView()
+                .tabItem {
+                    Label("Smart", systemImage: "sparkles")
+                }
+
             InboxView(showsQuickCapture: $showsQuickCapture)
                 .tabItem {
                     Label("Library", systemImage: "tray.full.fill")
@@ -227,6 +232,159 @@ private struct TimelineCaptureBlock: View {
     private var localImage: UIImage? {
         guard let fileName = item.assetFileName, let url = LocalFileStore.url(for: fileName) else { return nil }
         return UIImage(contentsOfFile: url.path)
+    }
+}
+
+private struct SmartSortView: View {
+    @Query(sort: \CaptureItem.createdAt, order: .reverse) private var allItems: [CaptureItem]
+
+    private var rootItems: [CaptureItem] {
+        allItems.filter { $0.parentCaptureID == nil }
+    }
+
+    private var topicGroups: [(topic: SmartTopic, items: [CaptureItem])] {
+        SmartTopic.allCases.compactMap { topic in
+            let items = rootItems.filter { item in
+                SmartSortClassifier.topic(for: item, linkedItems: linkedItems(for: item)) == topic
+            }
+            return items.isEmpty ? nil : (topic, items)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if topicGroups.isEmpty {
+                    ContentUnavailableView {
+                        Label("Nothing to sort yet", systemImage: "sparkles")
+                    } description: {
+                        Text("Your screenshots, notes, and voice transcripts will be grouped here automatically after you capture them.")
+                    }
+                } else {
+                    List {
+                        Section {
+                            Text("Smart sorting reads only the text already stored on this iPhone. A screenshot and its linked note or transcript are understood as one capture.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        ForEach(topicGroups, id: \.topic) { group in
+                            Section {
+                                ForEach(group.items, id: \.id) { item in
+                                    NavigationLink {
+                                        CaptureDetailView(item: item)
+                                    } label: {
+                                        CaptureRow(item: item)
+                                    }
+                                }
+                            } header: {
+                                Label("\(group.topic.title) (\(group.items.count))", systemImage: group.topic.symbol)
+                                    .foregroundStyle(group.topic.color)
+                            }
+                        }
+                    }
+                    .listStyle(.insetGrouped)
+                }
+            }
+            .navigationTitle("Smart Sort")
+        }
+    }
+
+    private func linkedItems(for item: CaptureItem) -> [CaptureItem] {
+        allItems.filter { $0.parentCaptureID == item.id }
+    }
+}
+
+private enum SmartTopic: String, CaseIterable, Identifiable {
+    case action
+    case work
+    case money
+    case idea
+    case place
+    case reference
+    case personal
+    case other
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .action: "Actions"
+        case .work: "Work"
+        case .money: "Money"
+        case .idea: "Ideas"
+        case .place: "Places"
+        case .reference: "Reference"
+        case .personal: "Personal"
+        case .other: "Everything else"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .action: "checklist"
+        case .work: "briefcase.fill"
+        case .money: "eurosign.circle.fill"
+        case .idea: "lightbulb.fill"
+        case .place: "mappin.and.ellipse"
+        case .reference: "bookmark.fill"
+        case .personal: "heart.fill"
+        case .other: "square.stack.3d.up"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .action: .orange
+        case .work: .indigo
+        case .money: .green
+        case .idea: .yellow
+        case .place: .teal
+        case .reference: .blue
+        case .personal: .pink
+        case .other: .secondary
+        }
+    }
+
+    var keywords: [String] {
+        switch self {
+        case .action:
+            ["todo", "to do", "remind", "reminder", "need to", "must", "call ", "email ", "send ", "buy ", "deadline", "tomorrow", "next week"]
+        case .work:
+            ["meeting", "agenda", "project", "client", "team", "presentation", "work", "proposal", "contract"]
+        case .money:
+            ["€", "eur", "receipt", "total", "price", "invoice", "payment", "bill", "order", "tax"]
+        case .idea:
+            ["idea", "concept", "brainstorm", "maybe", "could", "feature", "design", "inspiration"]
+        case .place:
+            ["address", "prague", "restaurant", "hotel", "flight", "train", "airport", "map", "location"]
+        case .reference:
+            ["http://", "https://", "www.", "article", "read later", "watch", "book", "podcast", "quote"]
+        case .personal:
+            ["family", "birthday", "health", "doctor", "home", "friend", "holiday"]
+        case .other:
+            []
+        }
+    }
+}
+
+private enum SmartSortClassifier {
+    static func topic(for item: CaptureItem, linkedItems: [CaptureItem]) -> SmartTopic {
+        let text = ([item.title, item.bodyText, item.tagsText] + linkedItems.flatMap { [$0.title, $0.bodyText, $0.tagsText] })
+            .joined(separator: " ")
+            .lowercased()
+
+        let scoredTopics = SmartTopic.allCases.dropLast().map { topic in
+            (topic, topic.keywords.reduce(into: 0) { score, keyword in
+                if text.contains(keyword) { score += 1 }
+            })
+        }
+
+        guard let bestMatch = scoredTopics.max(by: { lhs, rhs in lhs.1 < rhs.1 }), bestMatch.1 > 0 else {
+            return .other
+        }
+
+        return bestMatch.0
     }
 }
 
