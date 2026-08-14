@@ -1,0 +1,14 @@
+{
+  "name": "memory-space-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "bridge": "node src/bridge-server.mjs",
+    "mcp": "node src/mcp-server.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.4.3"
+  }
+}

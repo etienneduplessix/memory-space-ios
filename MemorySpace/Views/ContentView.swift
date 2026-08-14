@@ -373,7 +373,7 @@ private struct SmartSortView: View {
     }
 }
 
-private struct CustomSmartBlock: Codable, Identifiable {
+struct CustomSmartBlock: Codable, Identifiable {
     let id: UUID
     let title: String
     let keywordsText: String
@@ -730,6 +730,11 @@ private struct SettingsView: View {
 
                 Section("Integrations") {
                     Label("Quick Capture is available in Shortcuts and for the Action Button", systemImage: "button.programmable")
+                    NavigationLink {
+                        MacSyncView()
+                    } label: {
+                        Label("Sync to Mac", systemImage: "laptopcomputer.and.iphone")
+                    }
                 }
 
                 Section("Coming next") {
@@ -738,6 +743,105 @@ private struct SettingsView: View {
                 }
             }
             .navigationTitle("Privacy")
+        }
+    }
+}
+
+private struct MacSyncView: View {
+    @Query(sort: \CaptureItem.createdAt, order: .reverse) private var captures: [CaptureItem]
+    @AppStorage("macSyncEndpoint") private var endpoint = ""
+    @AppStorage("macSyncPairingToken") private var pairingToken = ""
+    @AppStorage("macSyncLastSuccess") private var lastSuccess = 0.0
+    @State private var isSyncing = false
+    @State private var message: String?
+
+    var body: some View {
+        Form {
+            Section {
+                TextField("http://192.168.1.20:8787", text: $endpoint)
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.URL)
+                    .autocorrectionDisabled()
+                SecureField("Pairing token from your Mac", text: $pairingToken)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+
+                Button("Test connection") {
+                    Task { await testConnection() }
+                }
+                .disabled(isSyncing || endpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            } header: {
+                Text("Connect your Mac")
+            } footer: {
+                Text("Start Memory Space Bridge on your Mac. It prints this address and a pairing token. Both devices must use the same trusted Wi‑Fi network.")
+            }
+
+            Section("Manual sync") {
+                Button {
+                    Task { await syncNow() }
+                } label: {
+                    HStack {
+                        Label(isSyncing ? "Syncing…" : "Sync to Mac now", systemImage: "arrow.triangle.2.circlepath")
+                        Spacer()
+                        if isSyncing {
+                            ProgressView()
+                        }
+                    }
+                }
+                .disabled(isSyncing || endpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || pairingToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                if lastSuccess > 0 {
+                    LabeledContent("Last sync") {
+                        Text(Date(timeIntervalSince1970: lastSuccess), format: .dateTime.day().month().hour().minute())
+                    }
+                }
+            }
+
+            Section("What your Mac receives") {
+                Label("Titles, notes, transcripts, tags, and Smart Blocks", systemImage: "text.alignleft")
+                Label("Compressed copies of screenshots and images", systemImage: "photo")
+                Label("Voice recordings stay on the iPhone; their transcript syncs", systemImage: "waveform")
+            }
+
+            Section("Privacy") {
+                Text("The Mac bridge is local-only. This first version uses a pairing token over your trusted home Wi‑Fi; do not use it on public networks.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let message {
+                Section {
+                    Text(message)
+                        .foregroundStyle(message.hasPrefix("Synced") || message.hasPrefix("Connection") ? .green : .red)
+                }
+            }
+        }
+        .navigationTitle("Sync to Mac")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    @MainActor
+    private func testConnection() async {
+        isSyncing = true
+        defer { isSyncing = false }
+        do {
+            try await MacSyncService.testConnection(endpointText: endpoint)
+            message = "Connection to your Mac is working."
+        } catch {
+            message = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func syncNow() async {
+        isSyncing = true
+        defer { isSyncing = false }
+        do {
+            let result = try await MacSyncService.sync(captures: captures, endpointText: endpoint, pairingToken: pairingToken)
+            lastSuccess = result.updatedAt.timeIntervalSince1970
+            message = "Synced \(result.receivedCaptures) captures to your Mac."
+        } catch {
+            message = error.localizedDescription
         }
     }
 }
