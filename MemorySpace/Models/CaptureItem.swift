@@ -38,6 +38,8 @@ final class CaptureItem {
     var durationSeconds: Double
     var isProcessing: Bool
     var transcriptionNotice: String?
+    /// Archived capture blocks stay stored locally but are hidden from the active timeline, library, Smart Sort, and Mac search.
+    var isArchived: Bool = false
     /// A note or recording can belong to a screenshot captured in the same Quick Capture session.
     var parentCaptureID: UUID?
 
@@ -51,6 +53,7 @@ final class CaptureItem {
         durationSeconds: Double = 0,
         isProcessing: Bool = false,
         transcriptionNotice: String? = nil,
+        isArchived: Bool = false,
         parentCaptureID: UUID? = nil
     ) {
         self.id = UUID()
@@ -64,6 +67,7 @@ final class CaptureItem {
         self.durationSeconds = durationSeconds
         self.isProcessing = isProcessing
         self.transcriptionNotice = transcriptionNotice
+        self.isArchived = isArchived
         self.parentCaptureID = parentCaptureID
     }
 

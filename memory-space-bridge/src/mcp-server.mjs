@@ -110,7 +110,7 @@ async function readSnapshot() {
 }
 
 function rootCaptures(snapshot) {
-  return (snapshot.captures ?? []).filter((capture) => !capture.parentCaptureID);
+  return (snapshot.captures ?? []).filter((capture) => !capture.parentCaptureID && !capture.isArchived);
 }
 
 function linkedCaptures(snapshot, capture) {

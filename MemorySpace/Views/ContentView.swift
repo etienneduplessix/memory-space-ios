@@ -55,9 +55,11 @@ struct ContentView: View {
 private struct TimelineView: View {
     @Binding var showsQuickCapture: Bool
     @Query(sort: \CaptureItem.createdAt, order: .reverse) private var allItems: [CaptureItem]
+    @State private var isSelecting = false
+    @State private var selectedIDs = Set<UUID>()
 
     private var rootItems: [CaptureItem] {
-        allItems.filter { $0.parentCaptureID == nil }
+        allItems.filter { $0.parentCaptureID == nil && !$0.isArchived }
     }
 
     private var dayGroups: [TimelineDay] {
@@ -100,16 +102,33 @@ private struct TimelineView: View {
                                         .padding(.horizontal, 20)
 
                                     ForEach(day.items, id: \.id) { item in
-                                        NavigationLink {
-                                            CaptureDetailView(item: item)
-                                        } label: {
-                                            TimelineCaptureBlock(
-                                                item: item,
-                                                linkedItems: allItems.filter { $0.parentCaptureID == item.id }
-                                            )
+                                        if isSelecting {
+                                            Button {
+                                                toggleSelection(for: item)
+                                            } label: {
+                                                HStack(alignment: .top, spacing: 10) {
+                                                    CaptureSelectionIndicator(isSelected: selectedIDs.contains(item.id))
+                                                        .padding(.top, 14)
+                                                    TimelineCaptureBlock(
+                                                        item: item,
+                                                        linkedItems: allItems.filter { $0.parentCaptureID == item.id }
+                                                    )
+                                                }
+                                            }
+                                            .buttonStyle(.plain)
+                                            .padding(.horizontal, 16)
+                                        } else {
+                                            NavigationLink {
+                                                CaptureDetailView(item: item)
+                                            } label: {
+                                                TimelineCaptureBlock(
+                                                    item: item,
+                                                    linkedItems: allItems.filter { $0.parentCaptureID == item.id }
+                                                )
+                                            }
+                                            .buttonStyle(.plain)
+                                            .padding(.horizontal, 16)
                                         }
-                                        .buttonStyle(.plain)
-                                        .padding(.horizontal, 16)
                                     }
                                 }
                             }
@@ -120,6 +139,14 @@ private struct TimelineView: View {
             }
             .navigationTitle("Timeline")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    if !dayGroups.isEmpty {
+                        Button(isSelecting ? "Done" : "Select") {
+                            isSelecting.toggle()
+                            if !isSelecting { selectedIDs.removeAll() }
+                        }
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showsQuickCapture = true
@@ -130,6 +157,24 @@ private struct TimelineView: View {
                     .accessibilityLabel("Quick Capture")
                 }
             }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if isSelecting {
+                    CaptureBulkActionBar(
+                        selectedIDs: $selectedIDs,
+                        isSelecting: $isSelecting,
+                        allItems: allItems,
+                        mode: .active
+                    )
+                }
+            }
+        }
+    }
+
+    private func toggleSelection(for item: CaptureItem) {
+        if selectedIDs.contains(item.id) {
+            selectedIDs.remove(item.id)
+        } else {
+            selectedIDs.insert(item.id)
         }
     }
 }
@@ -241,7 +286,7 @@ private struct SmartSortView: View {
     @State private var showsNewBlock = false
 
     private var rootItems: [CaptureItem] {
-        allItems.filter { $0.parentCaptureID == nil }
+        allItems.filter { $0.parentCaptureID == nil && !$0.isArchived }
     }
 
     private var topicGroups: [(topic: SmartTopic, items: [CaptureItem])] {
@@ -378,20 +423,49 @@ struct CustomSmartBlock: Codable, Identifiable {
     let title: String
     let keywordsText: String
     let createdAt: Date
+    var manualCaptureIDs: [UUID]
 
-    init(title: String, keywordsText: String) {
+    init(title: String, keywordsText: String, manualCaptureIDs: [UUID] = []) {
         self.id = UUID()
         self.title = title
         self.keywordsText = keywordsText
         self.createdAt = .now
+        self.manualCaptureIDs = manualCaptureIDs
     }
 
     func matches(item: CaptureItem, linkedItems: [CaptureItem]) -> Bool {
+        if manualCaptureIDs.contains(item.id) {
+            return true
+        }
+
         let text = ([item.title, item.bodyText, item.tagsText] + linkedItems.flatMap { [$0.title, $0.bodyText, $0.tagsText] })
             .joined(separator: " ")
             .lowercased()
 
         return matchingTerms.contains { text.contains($0) }
+    }
+
+    func including(_ captureIDs: Set<UUID>) -> CustomSmartBlock {
+        var updated = self
+        updated.manualCaptureIDs = Array(Set(manualCaptureIDs).union(captureIDs)).sorted { $0.uuidString < $1.uuidString }
+        return updated
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case keywordsText
+        case createdAt
+        case manualCaptureIDs
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        keywordsText = try container.decode(String.self, forKey: .keywordsText)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        manualCaptureIDs = try container.decodeIfPresent([UUID].self, forKey: .manualCaptureIDs) ?? []
     }
 
     private var matchingTerms: [String] {
@@ -550,9 +624,11 @@ private struct InboxView: View {
     @Binding var showsQuickCapture: Bool
     @Query(sort: \CaptureItem.createdAt, order: .reverse) private var items: [CaptureItem]
     @State private var searchText = ""
+    @State private var isSelecting = false
+    @State private var selectedIDs = Set<UUID>()
 
     private var filteredItems: [CaptureItem] {
-        let rootItems = items.filter { $0.parentCaptureID == nil }
+        let rootItems = items.filter { $0.parentCaptureID == nil && !$0.isArchived }
         guard !searchText.isEmpty else { return rootItems }
         return rootItems.filter { item in
             [item.title, item.bodyText, item.tagsText, item.collectionName]
@@ -579,10 +655,22 @@ private struct InboxView: View {
                     }
                 } else {
                     List(filteredItems, id: \.id) { item in
-                        NavigationLink {
-                            CaptureDetailView(item: item)
-                        } label: {
-                            CaptureRow(item: item)
+                        if isSelecting {
+                            Button {
+                                toggleSelection(for: item)
+                            } label: {
+                                HStack(spacing: 10) {
+                                    CaptureSelectionIndicator(isSelected: selectedIDs.contains(item.id))
+                                    CaptureRow(item: item)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            NavigationLink {
+                                CaptureDetailView(item: item)
+                            } label: {
+                                CaptureRow(item: item)
+                            }
                         }
                     }
                     .listStyle(.plain)
@@ -591,6 +679,24 @@ private struct InboxView: View {
             .navigationTitle("Memory Space")
             .searchable(text: $searchText, prompt: "Search your phone")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    if !filteredItems.isEmpty {
+                        Button(isSelecting ? "Done" : "Select") {
+                            isSelecting.toggle()
+                            if !isSelecting { selectedIDs.removeAll() }
+                        }
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if !archivedItems.isEmpty {
+                        NavigationLink {
+                            ArchivedItemsView()
+                        } label: {
+                            Image(systemName: "archivebox")
+                        }
+                        .accessibilityLabel("Archived captures")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showsQuickCapture = true
@@ -601,6 +707,28 @@ private struct InboxView: View {
                     .accessibilityLabel("Quick Capture")
                 }
             }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if isSelecting {
+                    CaptureBulkActionBar(
+                        selectedIDs: $selectedIDs,
+                        isSelecting: $isSelecting,
+                        allItems: items,
+                        mode: .active
+                    )
+                }
+            }
+        }
+    }
+
+    private var archivedItems: [CaptureItem] {
+        items.filter { $0.parentCaptureID == nil && $0.isArchived }
+    }
+
+    private func toggleSelection(for item: CaptureItem) {
+        if selectedIDs.contains(item.id) {
+            selectedIDs.remove(item.id)
+        } else {
+            selectedIDs.insert(item.id)
         }
     }
 }
@@ -693,28 +821,540 @@ private struct CollectionsView: View {
     }
 
     private var rootItems: [CaptureItem] {
-        items.filter { $0.parentCaptureID == nil }
+        items.filter { $0.parentCaptureID == nil && !$0.isArchived }
     }
 }
 
 private struct CollectionItemsView: View {
     let collectionName: String
     @Query(sort: \CaptureItem.createdAt, order: .reverse) private var allItems: [CaptureItem]
+    @State private var isSelecting = false
+    @State private var selectedIDs = Set<UUID>()
 
     private var items: [CaptureItem] {
-        allItems.filter { $0.collectionName == collectionName && $0.parentCaptureID == nil }
+        allItems.filter { $0.collectionName == collectionName && $0.parentCaptureID == nil && !$0.isArchived }
     }
 
     var body: some View {
         List(items, id: \.id) { item in
-            NavigationLink {
-                CaptureDetailView(item: item)
-            } label: {
-                CaptureRow(item: item)
+            if isSelecting {
+                Button {
+                    toggleSelection(for: item)
+                } label: {
+                    HStack(spacing: 10) {
+                        CaptureSelectionIndicator(isSelected: selectedIDs.contains(item.id))
+                        CaptureRow(item: item)
+                    }
+                }
+                .buttonStyle(.plain)
+            } else {
+                NavigationLink {
+                    CaptureDetailView(item: item)
+                } label: {
+                    CaptureRow(item: item)
+                }
             }
         }
         .navigationTitle(collectionName)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(isSelecting ? "Done" : "Select") {
+                    isSelecting.toggle()
+                    if !isSelecting { selectedIDs.removeAll() }
+                }
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if isSelecting {
+                CaptureBulkActionBar(
+                    selectedIDs: $selectedIDs,
+                    isSelecting: $isSelecting,
+                    allItems: allItems,
+                    mode: .active
+                )
+            }
+        }
+    }
+
+    private func toggleSelection(for item: CaptureItem) {
+        if selectedIDs.contains(item.id) {
+            selectedIDs.remove(item.id)
+        } else {
+            selectedIDs.insert(item.id)
+        }
+    }
+}
+
+private struct ArchivedItemsView: View {
+    @Query(sort: \CaptureItem.createdAt, order: .reverse) private var allItems: [CaptureItem]
+    @State private var isSelecting = false
+    @State private var selectedIDs = Set<UUID>()
+
+    private var items: [CaptureItem] {
+        allItems.filter { $0.parentCaptureID == nil && $0.isArchived }
+    }
+
+    var body: some View {
+        Group {
+            if items.isEmpty {
+                ContentUnavailableView("No archived captures", systemImage: "archivebox")
+            } else {
+                List(items, id: \.id) { item in
+                    if isSelecting {
+                        Button {
+                            toggleSelection(for: item)
+                        } label: {
+                            HStack(spacing: 10) {
+                                CaptureSelectionIndicator(isSelected: selectedIDs.contains(item.id))
+                                CaptureRow(item: item)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        NavigationLink {
+                            CaptureDetailView(item: item)
+                        } label: {
+                            CaptureRow(item: item)
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Archive")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                if !items.isEmpty {
+                    Button(isSelecting ? "Done" : "Select") {
+                        isSelecting.toggle()
+                        if !isSelecting { selectedIDs.removeAll() }
+                    }
+                }
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if isSelecting {
+                CaptureBulkActionBar(
+                    selectedIDs: $selectedIDs,
+                    isSelecting: $isSelecting,
+                    allItems: allItems,
+                    mode: .archived
+                )
+            }
+        }
+    }
+
+    private func toggleSelection(for item: CaptureItem) {
+        if selectedIDs.contains(item.id) {
+            selectedIDs.remove(item.id)
+        } else {
+            selectedIDs.insert(item.id)
+        }
+    }
+}
+
+private struct CaptureSelectionIndicator: View {
+    let isSelected: Bool
+
+    var body: some View {
+        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+            .font(.title3)
+            .foregroundStyle(isSelected ? .indigo : .secondary)
+            .accessibilityLabel(isSelected ? "Selected" : "Not selected")
+    }
+}
+
+private enum CaptureBulkMode {
+    case active
+    case archived
+
+    var archiveTitle: String {
+        switch self {
+        case .active: "Archive"
+        case .archived: "Restore from Archive"
+        }
+    }
+
+    var archiveSymbol: String {
+        switch self {
+        case .active: "archivebox"
+        case .archived: "arrow.uturn.backward"
+        }
+    }
+
+    var archiveValue: Bool {
+        self == .active
+    }
+}
+
+private struct CaptureBulkActionBar: View {
+    @Environment(\.modelContext) private var modelContext
+    @Binding var selectedIDs: Set<UUID>
+    @Binding var isSelecting: Bool
+    let allItems: [CaptureItem]
+    let mode: CaptureBulkMode
+
+    @AppStorage("customSmartBlocksData") private var customBlocksData = Data()
+    @State private var showsMoveSheet = false
+    @State private var showsTagSheet = false
+    @State private var showsSmartBlockSheet = false
+    @State private var showsDeleteConfirmation = false
+
+    private var selectedRoots: [CaptureItem] {
+        allItems.filter { $0.parentCaptureID == nil && selectedIDs.contains($0.id) }
+    }
+
+    private var selectedCount: Int {
+        selectedRoots.count
+    }
+
+    private var collectionNames: [String] {
+        Array(Set(allItems.filter { $0.parentCaptureID == nil }.map(\.collectionName)))
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    private var customBlocks: [CustomSmartBlock] {
+        guard !customBlocksData.isEmpty,
+              let blocks = try? JSONDecoder().decode([CustomSmartBlock].self, from: customBlocksData) else {
+            return []
+        }
+        return blocks.sorted { $0.createdAt < $1.createdAt }
+    }
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Text(selectedCount == 1 ? "1 capture block selected" : "\(selectedCount) capture blocks selected")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 10) {
+                Button {
+                    showsMoveSheet = true
+                } label: {
+                    Label("Move", systemImage: "folder")
+                }
+                .buttonStyle(.bordered)
+
+                Button {
+                    showsTagSheet = true
+                } label: {
+                    Label("Tags", systemImage: "tag")
+                }
+                .buttonStyle(.bordered)
+
+                Menu {
+                    Button {
+                        showsSmartBlockSheet = true
+                    } label: {
+                        Label("Add to Smart Block", systemImage: "square.stack.3d.up")
+                    }
+
+                    Button {
+                        setArchived(mode.archiveValue)
+                    } label: {
+                        Label(mode.archiveTitle, systemImage: mode.archiveSymbol)
+                    }
+
+                    Divider()
+
+                    Button(role: .destructive) {
+                        showsDeleteConfirmation = true
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                } label: {
+                    Label("More", systemImage: "ellipsis.circle")
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(.bar)
+        .disabled(selectedCount == 0)
+        .sheet(isPresented: $showsMoveSheet) {
+            BulkMoveCollectionSheet(collectionNames: collectionNames) { collectionName in
+                moveSelectedBlocks(to: collectionName)
+            }
+        }
+        .sheet(isPresented: $showsTagSheet) {
+            BulkTagsSheet { addTags, removeTags in
+                updateTags(addTags: addTags, removeTags: removeTags)
+            }
+        }
+        .sheet(isPresented: $showsSmartBlockSheet) {
+            BulkSmartBlockPicker(
+                blocks: customBlocks,
+                onSelect: addSelectedBlocks(to:),
+                onCreate: createSmartBlock(title:keywords:)
+            )
+        }
+        .confirmationDialog(
+            "Delete \(selectedCount) capture \(selectedCount == 1 ? "block" : "blocks")?",
+            isPresented: $showsDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                deleteSelectedBlocks()
+            }
+        } message: {
+            Text("The selected captures, their linked notes and recordings, and local files will be permanently removed from this iPhone.")
+        }
+    }
+
+    private func moveSelectedBlocks(to collectionName: String) {
+        for item in itemsInSelectedBlocks {
+            item.collectionName = collectionName
+        }
+    }
+
+    private func updateTags(addTags: String, removeTags: String) {
+        let additions = tags(from: addTags)
+        let removals = Set(tags(from: removeTags).map { $0.lowercased() })
+
+        for item in selectedRoots {
+            var updatedTags = item.tags.filter { !removals.contains($0.lowercased()) }
+            for tag in additions where !updatedTags.contains(where: { $0.caseInsensitiveCompare(tag) == .orderedSame }) {
+                updatedTags.append(tag)
+            }
+            item.tagsText = updatedTags.joined(separator: ", ")
+        }
+    }
+
+    private func addSelectedBlocks(to block: CustomSmartBlock) {
+        let updatedBlocks = customBlocks.map { currentBlock in
+            currentBlock.id == block.id ? currentBlock.including(selectedIDs) : currentBlock
+        }
+        save(blocks: updatedBlocks)
+    }
+
+    private func createSmartBlock(title: String, keywords: String) {
+        var blocks = customBlocks
+        blocks.append(CustomSmartBlock(title: title, keywordsText: keywords, manualCaptureIDs: Array(selectedIDs)))
+        save(blocks: blocks)
+    }
+
+    private func setArchived(_ isArchived: Bool) {
+        for item in itemsInSelectedBlocks {
+            item.isArchived = isArchived
+        }
+        finishSelection()
+    }
+
+    private func deleteSelectedBlocks() {
+        for item in itemsInSelectedBlocks {
+            if let fileName = item.assetFileName {
+                LocalFileStore.remove(fileName: fileName)
+            }
+            modelContext.delete(item)
+        }
+        finishSelection()
+    }
+
+    private var itemsInSelectedBlocks: [CaptureItem] {
+        var includedIDs = Set(selectedRoots.map(\.id))
+        var foundNewItem = true
+
+        while foundNewItem {
+            foundNewItem = false
+            for item in allItems where !includedIDs.contains(item.id) && item.parentCaptureID.map(includedIDs.contains) == true {
+                includedIDs.insert(item.id)
+                foundNewItem = true
+            }
+        }
+
+        return allItems.filter { includedIDs.contains($0.id) }
+    }
+
+    private func tags(from text: String) -> [String] {
+        text
+            .split(whereSeparator: { $0 == "," || $0.isNewline })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func save(blocks: [CustomSmartBlock]) {
+        customBlocksData = (try? JSONEncoder().encode(blocks)) ?? customBlocksData
+    }
+
+    private func finishSelection() {
+        selectedIDs.removeAll()
+        isSelecting = false
+    }
+}
+
+private struct BulkMoveCollectionSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let collectionNames: [String]
+    let onMove: (String) -> Void
+    @State private var newCollectionName = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if !collectionNames.isEmpty {
+                    Section("Existing collections") {
+                        ForEach(collectionNames, id: \.self) { collectionName in
+                            Button(collectionName) {
+                                onMove(collectionName)
+                                dismiss()
+                            }
+                        }
+                    }
+                }
+
+                Section("New collection") {
+                    TextField("Collection name", text: $newCollectionName)
+                    Button("Move here") {
+                        onMove(cleanedNewCollectionName)
+                        dismiss()
+                    }
+                    .disabled(cleanedNewCollectionName.isEmpty)
+                }
+            }
+            .navigationTitle("Move capture blocks")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private var cleanedNewCollectionName: String {
+        newCollectionName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+private struct BulkTagsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let onApply: (String, String) -> Void
+    @State private var addTags = ""
+    @State private var removeTags = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Add tags") {
+                    TextField("idea, person, follow-up", text: $addTags, axis: .vertical)
+                    Text("Separate tags with commas or new lines.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Remove tags") {
+                    TextField("receipt, old", text: $removeTags, axis: .vertical)
+                    Text("Removal is case-insensitive.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Edit tags")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Apply") {
+                        onApply(addTags, removeTags)
+                        dismiss()
+                    }
+                    .disabled(addTags.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && removeTags.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+    }
+}
+
+private struct BulkSmartBlockPicker: View {
+    @Environment(\.dismiss) private var dismiss
+    let blocks: [CustomSmartBlock]
+    let onSelect: (CustomSmartBlock) -> Void
+    let onCreate: (String, String) -> Void
+    @State private var isCreatingBlock = false
+    @State private var title = ""
+    @State private var keywords = ""
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if isCreatingBlock {
+                    Form {
+                        Section("Block") {
+                            TextField("Name, for example People to follow up", text: $title)
+                        }
+
+                        Section("Automatic matching, optional") {
+                            TextEditor(text: $keywords)
+                                .frame(minHeight: 110)
+                            Text("The selected capture blocks are added now. Keywords add future matching captures automatically.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .navigationTitle("New Smart Block")
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Back") { isCreatingBlock = false }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Create") {
+                                onCreate(title.trimmingCharacters(in: .whitespacesAndNewlines), keywords)
+                                dismiss()
+                            }
+                            .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+                    }
+                } else {
+                    List {
+                        if blocks.isEmpty {
+                            ContentUnavailableView {
+                                Label("No Smart Blocks yet", systemImage: "square.stack.3d.up")
+                            } description: {
+                                Text("Create one now, or create blocks later from the Smart tab.")
+                            }
+                        } else {
+                            Section("Choose a Smart Block") {
+                                ForEach(blocks) { block in
+                                    Button {
+                                        onSelect(block)
+                                        dismiss()
+                                    } label: {
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(block.title)
+                                            if !block.keywordsText.isEmpty {
+                                                Text(block.keywordsText)
+                                                    .font(.footnote)
+                                                    .foregroundStyle(.secondary)
+                                                    .lineLimit(1)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Section {
+                            Button {
+                                isCreatingBlock = true
+                            } label: {
+                                Label("Create Smart Block", systemImage: "plus.circle.fill")
+                            }
+                        }
+                    }
+                    .navigationTitle("Add to Smart Block")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") { dismiss() }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

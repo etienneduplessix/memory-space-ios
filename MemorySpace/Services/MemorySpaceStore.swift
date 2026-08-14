@@ -158,6 +158,7 @@ private struct MacSyncCapture: Encodable {
     let durationSeconds: Double
     let isProcessing: Bool
     let transcriptionNotice: String?
+    let isArchived: Bool
     let imageBase64: String?
 
     @MainActor
@@ -173,6 +174,7 @@ private struct MacSyncCapture: Encodable {
         durationSeconds = item.durationSeconds
         isProcessing = item.isProcessing
         transcriptionNotice = item.transcriptionNotice
+        isArchived = item.isArchived
         imageBase64 = Self.compressedImageData(for: item)?.base64EncodedString()
     }
 
