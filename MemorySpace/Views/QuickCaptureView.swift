@@ -13,6 +13,8 @@ struct QuickCaptureView: View {
     @State private var showsNoteEditor = false
     @State private var showsScreenshotHelp = false
     @AppStorage("importLatestScreenshotRequested") private var importLatestScreenshotRequested = false
+    @Query(sort: \CaptureItem.createdAt, order: .reverse) private var captures: [CaptureItem]
+    @State private var activeScreenshotID: UUID?
     @State private var isSaving = false
     @State private var message: String?
 
@@ -33,6 +35,10 @@ struct QuickCaptureView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                if let activeScreenshot {
+                    activeScreenshotCard(activeScreenshot)
+                }
+
                 Button {
                     Task {
                         if recorder.isRecording {
@@ -44,7 +50,10 @@ struct QuickCaptureView: View {
                         }
                     }
                 } label: {
-                    Label(recorder.isRecording ? "Stop and save" : "Record a thought", systemImage: recorder.isRecording ? "stop.fill" : "mic.fill")
+                    Label(
+                        recorder.isRecording ? "Stop and save" : activeScreenshotID == nil ? "Record a thought" : "Add voice note to screenshot",
+                        systemImage: recorder.isRecording ? "stop.fill" : "mic.fill"
+                    )
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 7)
                 }
@@ -65,7 +74,7 @@ struct QuickCaptureView: View {
                     Button {
                         showsNoteEditor = true
                     } label: {
-                        Label("Write note", systemImage: "square.and.pencil")
+                        Label(activeScreenshotID == nil ? "Write note" : "Add note", systemImage: "square.and.pencil")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
@@ -122,20 +131,20 @@ struct QuickCaptureView: View {
                         message = "The selected image could not be read."
                         return
                     }
-                    await saveImage(data)
+                    _ = await saveImage(data)
                     selectedPhoto = nil
                 }
             }
             .fullScreenCover(isPresented: $showsCamera) {
                 CameraPicker { imageData in
                     Task {
-                        await saveImage(imageData)
+                        _ = await saveImage(imageData)
                     }
                 }
                 .ignoresSafeArea()
             }
             .sheet(isPresented: $showsNoteEditor) {
-                QuickNoteView()
+                QuickNoteView(parentCaptureID: activeScreenshotID)
             }
             .sheet(isPresented: $showsScreenshotHelp) {
                 ScreenshotShortcutHelpView()
@@ -144,6 +153,40 @@ struct QuickCaptureView: View {
                 await importLatestScreenshotIfRequested()
             }
         }
+    }
+
+    private var activeScreenshot: CaptureItem? {
+        guard let activeScreenshotID else { return nil }
+        return captures.first { $0.id == activeScreenshotID }
+    }
+
+    @ViewBuilder
+    private func activeScreenshotCard(_ screenshot: CaptureItem) -> some View {
+        HStack(spacing: 12) {
+            if let preview = localImage(for: screenshot) {
+                Image(uiImage: preview)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 58, height: 58)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            } else {
+                Image(systemName: "viewfinder")
+                    .font(.title2)
+                    .frame(width: 58, height: 58)
+                    .background(.indigo.opacity(0.15), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Screenshot linked")
+                    .font(.headline)
+                Text("Your next note or voice transcript will be attached to this screenshot.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(12)
+        .background(.indigo.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     @MainActor
@@ -156,7 +199,8 @@ struct QuickCaptureView: View {
             title: "Voice note",
             assetFileName: recording.url.lastPathComponent,
             durationSeconds: recording.duration,
-            isProcessing: true
+            isProcessing: true,
+            parentCaptureID: activeScreenshotID
         )
         modelContext.insert(item)
         try? modelContext.save()
@@ -168,11 +212,15 @@ struct QuickCaptureView: View {
             item.transcriptionNotice = nil
             item.title = CaptureItem.suggestedTitle(from: transcript, fallback: "Voice note")
             item.tagsText = CaptureItem.suggestedTags(from: transcript).joined(separator: ", ")
-            message = "Voice note and local transcript saved."
+            message = activeScreenshotID == nil
+                ? "Voice note and local transcript saved."
+                : "Voice note and local transcript linked to the screenshot."
         case .unavailable(let explanation):
             item.bodyText = ""
             item.transcriptionNotice = explanation
-            message = "Voice note saved. \(explanation)"
+            message = activeScreenshotID == nil
+                ? "Voice note saved. \(explanation)"
+                : "Voice note linked to the screenshot. \(explanation)"
         }
         item.isProcessing = false
         try? modelContext.save()
@@ -181,7 +229,7 @@ struct QuickCaptureView: View {
     }
 
     @MainActor
-    private func saveImage(_ imageData: Data) async {
+    private func saveImage(_ imageData: Data, fallbackTitle: String = "Photo capture") async -> UUID? {
         isSaving = true
         message = "Extracting text on this iPhone…"
 
@@ -189,7 +237,7 @@ struct QuickCaptureView: View {
             let fileName = try LocalFileStore.save(data: imageData, fileExtension: "image")
             let item = CaptureItem(
                 kind: .image,
-                title: "Photo capture",
+                title: fallbackTitle,
                 assetFileName: fileName,
                 isProcessing: true
             )
@@ -198,16 +246,18 @@ struct QuickCaptureView: View {
 
             let extractedText = await TextExtractor.extractText(from: imageData)
             item.bodyText = extractedText
-            item.title = CaptureItem.suggestedTitle(from: extractedText, fallback: "Photo capture")
+            item.title = CaptureItem.suggestedTitle(from: extractedText, fallback: fallbackTitle)
             item.tagsText = CaptureItem.suggestedTags(from: extractedText).joined(separator: ", ")
             item.isProcessing = false
             try modelContext.save()
             message = extractedText.isEmpty ? "Photo saved locally." : "Photo and extracted text saved locally."
+            isSaving = false
+            return item.id
         } catch {
             message = "The photo could not be saved: \(error.localizedDescription)"
+            isSaving = false
+            return nil
         }
-
-        isSaving = false
     }
 
     private func timeString(_ interval: TimeInterval) -> String {
@@ -224,11 +274,19 @@ struct QuickCaptureView: View {
 
         do {
             let imageData = try await LatestScreenshotImporter.loadLatestScreenshot()
-            await saveImage(imageData)
+            if let screenshotID = await saveImage(imageData, fallbackTitle: "Screenshot") {
+                activeScreenshotID = screenshotID
+                message = "Screenshot ready. Add a note or voice recording below — it will stay linked."
+            }
         } catch {
             message = error.localizedDescription
             isSaving = false
         }
+    }
+
+    private func localImage(for item: CaptureItem) -> UIImage? {
+        guard let fileName = item.assetFileName, let url = LocalFileStore.url(for: fileName) else { return nil }
+        return UIImage(contentsOfFile: url.path)
     }
 }
 
@@ -236,6 +294,7 @@ private struct QuickNoteView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @State private var noteText = ""
+    let parentCaptureID: UUID?
 
     var body: some View {
         NavigationStack {
@@ -279,7 +338,8 @@ private struct QuickNoteView: View {
             kind: .text,
             title: CaptureItem.suggestedTitle(from: text, fallback: "Note"),
             bodyText: text,
-            tags: CaptureItem.suggestedTags(from: text)
+            tags: CaptureItem.suggestedTags(from: text),
+            parentCaptureID: parentCaptureID
         )
         modelContext.insert(item)
         try? modelContext.save()

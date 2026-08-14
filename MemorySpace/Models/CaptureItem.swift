@@ -38,6 +38,8 @@ final class CaptureItem {
     var durationSeconds: Double
     var isProcessing: Bool
     var transcriptionNotice: String?
+    /// A note or recording can belong to a screenshot captured in the same Quick Capture session.
+    var parentCaptureID: UUID?
 
     init(
         kind: CaptureKind,
@@ -48,7 +50,8 @@ final class CaptureItem {
         assetFileName: String? = nil,
         durationSeconds: Double = 0,
         isProcessing: Bool = false,
-        transcriptionNotice: String? = nil
+        transcriptionNotice: String? = nil,
+        parentCaptureID: UUID? = nil
     ) {
         self.id = UUID()
         self.createdAt = .now
@@ -61,6 +64,7 @@ final class CaptureItem {
         self.durationSeconds = durationSeconds
         self.isProcessing = isProcessing
         self.transcriptionNotice = transcriptionNotice
+        self.parentCaptureID = parentCaptureID
     }
 
     var kind: CaptureKind {

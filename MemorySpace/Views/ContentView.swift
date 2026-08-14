@@ -47,8 +47,9 @@ private struct InboxView: View {
     @State private var searchText = ""
 
     private var filteredItems: [CaptureItem] {
-        guard !searchText.isEmpty else { return items }
-        return items.filter { item in
+        let rootItems = items.filter { $0.parentCaptureID == nil }
+        guard !searchText.isEmpty else { return rootItems }
+        return rootItems.filter { item in
             [item.title, item.bodyText, item.tagsText, item.collectionName]
                 .joined(separator: " ")
                 .localizedCaseInsensitiveContains(searchText)
@@ -151,7 +152,7 @@ private struct CollectionsView: View {
     @Query(sort: \CaptureItem.createdAt, order: .reverse) private var items: [CaptureItem]
 
     private var names: [String] {
-        Array(Set(items.map(\.collectionName))).sorted { lhs, rhs in
+        Array(Set(rootItems.map(\.collectionName))).sorted { lhs, rhs in
             if lhs == "Inbox" { return true }
             if rhs == "Inbox" { return false }
             return lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
@@ -172,7 +173,7 @@ private struct CollectionsView: View {
                                 HStack {
                                     Text(name)
                                     Spacer()
-                                    Text("\(items.filter { $0.collectionName == name }.count)")
+                                    Text("\(rootItems.filter { $0.collectionName == name }.count)")
                                         .foregroundStyle(.secondary)
                                 }
                             } icon: {
@@ -185,6 +186,10 @@ private struct CollectionsView: View {
             .navigationTitle("Collections")
         }
     }
+
+    private var rootItems: [CaptureItem] {
+        items.filter { $0.parentCaptureID == nil }
+    }
 }
 
 private struct CollectionItemsView: View {
@@ -192,7 +197,7 @@ private struct CollectionItemsView: View {
     @Query(sort: \CaptureItem.createdAt, order: .reverse) private var allItems: [CaptureItem]
 
     private var items: [CaptureItem] {
-        allItems.filter { $0.collectionName == collectionName }
+        allItems.filter { $0.collectionName == collectionName && $0.parentCaptureID == nil }
     }
 
     var body: some View {

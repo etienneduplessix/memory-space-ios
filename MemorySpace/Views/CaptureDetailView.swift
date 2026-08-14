@@ -5,6 +5,7 @@ import UIKit
 struct CaptureDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Query(sort: \CaptureItem.createdAt, order: .reverse) private var allItems: [CaptureItem]
     @Bindable var item: CaptureItem
     @State private var showsDeleteConfirmation = false
 
@@ -60,6 +61,38 @@ struct CaptureDetailView: View {
                     .textInputAutocapitalization(.never)
             }
 
+            if let parentItem {
+                Section("Attached to") {
+                    NavigationLink {
+                        CaptureDetailView(item: parentItem)
+                    } label: {
+                        Label(parentItem.title, systemImage: "viewfinder")
+                    }
+                }
+            }
+
+            if !linkedItems.isEmpty {
+                Section("Linked notes and recordings") {
+                    ForEach(linkedItems, id: \.id) { linkedItem in
+                        NavigationLink {
+                            CaptureDetailView(item: linkedItem)
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: linkedItem.kind.symbol)
+                                    .foregroundStyle(linkedItem.kind == .voice ? .indigo : .mint)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(linkedItem.title)
+                                    Text(linkedItem.previewText)
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             Section {
                 Button("Delete capture", role: .destructive) {
                     showsDeleteConfirmation = true
@@ -70,6 +103,12 @@ struct CaptureDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog("Delete this capture?", isPresented: $showsDeleteConfirmation, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
+                for linkedItem in linkedItems {
+                    if let fileName = linkedItem.assetFileName {
+                        LocalFileStore.remove(fileName: fileName)
+                    }
+                    modelContext.delete(linkedItem)
+                }
                 if let fileName = item.assetFileName {
                     LocalFileStore.remove(fileName: fileName)
                 }
@@ -84,6 +123,15 @@ struct CaptureDetailView: View {
     private var localImage: UIImage? {
         guard let fileName = item.assetFileName, let url = LocalFileStore.url(for: fileName) else { return nil }
         return UIImage(contentsOfFile: url.path)
+    }
+
+    private var linkedItems: [CaptureItem] {
+        allItems.filter { $0.parentCaptureID == item.id }
+    }
+
+    private var parentItem: CaptureItem? {
+        guard let parentCaptureID = item.parentCaptureID else { return nil }
+        return allItems.first { $0.id == parentCaptureID }
     }
 
     private func durationString(_ interval: TimeInterval) -> String {
