@@ -114,8 +114,17 @@ private final class NearbyBridgeReceiver: @unchecked Sendable {
         }
 
         let key = SymmetricKey(data: Data(SHA256.hash(data: Data(configuration.pairingToken.utf8))))
-        let sealedBox = try AES.GCM.SealedBox(nonce: AES.GCM.Nonce(data: nonce), ciphertext: ciphertext, tag: tag)
-        let payloadData = try AES.GCM.open(sealedBox, using: key)
+        let payloadData: Data
+        do {
+            let sealedBox = try AES.GCM.SealedBox(nonce: AES.GCM.Nonce(data: nonce), ciphertext: ciphertext, tag: tag)
+            payloadData = try AES.GCM.open(sealedBox, using: key)
+        } catch {
+            throw NSError(
+                domain: "MemorySpaceNearbyBridge",
+                code: 401,
+                userInfo: [NSLocalizedDescriptionKey: "Pairing token does not match. Copy the current token from the Mac receiver into Memory Space, then try again."]
+            )
+        }
 
         guard let payload = try JSONSerialization.jsonObject(with: payloadData) as? [String: Any],
               let rawCaptures = payload["captures"] as? [[String: Any]] else {
