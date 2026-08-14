@@ -237,6 +237,8 @@ private struct TimelineCaptureBlock: View {
 
 private struct SmartSortView: View {
     @Query(sort: \CaptureItem.createdAt, order: .reverse) private var allItems: [CaptureItem]
+    @AppStorage("customSmartBlocksData") private var customBlocksData = Data()
+    @State private var showsNewBlock = false
 
     private var rootItems: [CaptureItem] {
         allItems.filter { $0.parentCaptureID == nil }
@@ -254,7 +256,7 @@ private struct SmartSortView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if topicGroups.isEmpty {
+                if topicGroups.isEmpty && customBlocks.isEmpty {
                     ContentUnavailableView {
                         Label("Nothing to sort yet", systemImage: "sparkles")
                     } description: {
@@ -266,6 +268,49 @@ private struct SmartSortView: View {
                             Text("Smart sorting reads only the text already stored on this iPhone. A screenshot and its linked note or transcript are understood as one capture.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
+                        }
+
+                        if !customBlocks.isEmpty {
+                            Section("My blocks") {
+                                Text("Matching captures appear in these blocks automatically.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            ForEach(customBlocks) { block in
+                                let matchedItems = rootItems.filter { item in
+                                    block.matches(item: item, linkedItems: linkedItems(for: item))
+                                }
+
+                                Section {
+                                    if matchedItems.isEmpty {
+                                        Label("Waiting for a matching capture", systemImage: "hourglass")
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                    } else {
+                                        ForEach(matchedItems, id: \.id) { item in
+                                            NavigationLink {
+                                                CaptureDetailView(item: item)
+                                            } label: {
+                                                CaptureRow(item: item)
+                                            }
+                                        }
+                                    }
+                                } header: {
+                                    HStack {
+                                        Label(block.title, systemImage: "square.stack.3d.up.fill")
+                                            .foregroundStyle(.indigo)
+                                        Spacer()
+                                        Button("Delete", role: .destructive) {
+                                            delete(block)
+                                        }
+                                        .textCase(nil)
+                                        .font(.caption)
+                                    }
+                                } footer: {
+                                    Text(block.keywordsText)
+                                }
+                            }
                         }
 
                         ForEach(topicGroups, id: \.topic) { group in
@@ -287,11 +332,124 @@ private struct SmartSortView: View {
                 }
             }
             .navigationTitle("Smart Sort")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showsNewBlock = true
+                    } label: {
+                        Label("Create block", systemImage: "plus.circle.fill")
+                    }
+                }
+            }
+            .sheet(isPresented: $showsNewBlock) {
+                CreateSmartBlockView { block in
+                    save(block)
+                }
+            }
         }
     }
 
     private func linkedItems(for item: CaptureItem) -> [CaptureItem] {
         allItems.filter { $0.parentCaptureID == item.id }
+    }
+
+    private var customBlocks: [CustomSmartBlock] {
+        guard !customBlocksData.isEmpty,
+              let blocks = try? JSONDecoder().decode([CustomSmartBlock].self, from: customBlocksData) else {
+            return []
+        }
+        return blocks.sorted { $0.createdAt < $1.createdAt }
+    }
+
+    private func save(_ block: CustomSmartBlock) {
+        var blocks = customBlocks
+        blocks.append(block)
+        customBlocksData = (try? JSONEncoder().encode(blocks)) ?? customBlocksData
+    }
+
+    private func delete(_ block: CustomSmartBlock) {
+        let blocks = customBlocks.filter { $0.id != block.id }
+        customBlocksData = (try? JSONEncoder().encode(blocks)) ?? customBlocksData
+    }
+}
+
+private struct CustomSmartBlock: Codable, Identifiable {
+    let id: UUID
+    let title: String
+    let keywordsText: String
+    let createdAt: Date
+
+    init(title: String, keywordsText: String) {
+        self.id = UUID()
+        self.title = title
+        self.keywordsText = keywordsText
+        self.createdAt = .now
+    }
+
+    func matches(item: CaptureItem, linkedItems: [CaptureItem]) -> Bool {
+        let text = ([item.title, item.bodyText, item.tagsText] + linkedItems.flatMap { [$0.title, $0.bodyText, $0.tagsText] })
+            .joined(separator: " ")
+            .lowercased()
+
+        return matchingTerms.contains { text.contains($0) }
+    }
+
+    private var matchingTerms: [String] {
+        let keywords = keywordsText
+            .split(whereSeparator: { $0 == "," || $0 == "\n" })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+        let titleWords = title
+            .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+            .map(String.init)
+            .filter { $0.count > 2 }
+            .map { $0.lowercased() }
+
+        return Array(Set(keywords + titleWords)).filter { !$0.isEmpty }
+    }
+}
+
+private struct CreateSmartBlockView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var title = ""
+    @State private var keywords = ""
+    let onSave: (CustomSmartBlock) -> Void
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Block") {
+                    TextField("Name, for example Waard ideas", text: $title)
+                }
+
+                Section("What belongs in it?") {
+                    TextEditor(text: $keywords)
+                        .frame(minHeight: 110)
+                    Text("Add words or short phrases separated by commas. The block name is also used automatically.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Example") {
+                    Text("For “Waard ideas”, add: wand, dragon, spell, gameplay, AR")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Create block")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Create") {
+                        onSave(CustomSmartBlock(title: title.trimmingCharacters(in: .whitespacesAndNewlines), keywordsText: keywords))
+                        dismiss()
+                    }
+                    .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
     }
 }
 
